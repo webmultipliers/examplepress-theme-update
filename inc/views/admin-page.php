@@ -62,6 +62,9 @@ defined( 'ABSPATH' ) || exit;
 				<button type="button" class="button button-primary" id="ep-install-update" disabled>
 					<?php esc_html_e( 'Update Theme', 'examplepress-theme-update' ); ?>
 				</button>
+				<button type="button" class="button" id="ep-reinstall" disabled>
+					<?php esc_html_e( 'Reinstall Current Version', 'examplepress-theme-update' ); ?>
+				</button>
 				<span class="spinner" id="ep-action-spinner"></span>
 				<div class="ep-progress" id="ep-progress" hidden>
 					<div class="ep-progress-bar"></div>

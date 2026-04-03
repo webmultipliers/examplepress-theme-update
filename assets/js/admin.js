@@ -14,7 +14,7 @@
 
 	// ── DOM refs ──────────────────────────────────────────────────────
 	let $notices, $statusContent, $channelContent, $pinContent;
-	let $releasesContent, $checkBtn, $installBtn, $spinner, $progress;
+	let $releasesContent, $checkBtn, $installBtn, $reinstallBtn, $spinner, $progress;
 
 	// ── State ─────────────────────────────────────────────────────────
 	let currentStatus  = null;
@@ -30,11 +30,13 @@
 		$releasesContent = document.querySelector( '.ep-releases-content' );
 		$checkBtn        = document.getElementById( 'ep-check-updates' );
 		$installBtn      = document.getElementById( 'ep-install-update' );
+		$reinstallBtn    = document.getElementById( 'ep-reinstall' );
 		$spinner         = document.getElementById( 'ep-action-spinner' );
 		$progress        = document.getElementById( 'ep-progress' );
 
 		$checkBtn.addEventListener( 'click', handleCheckUpdates );
 		$installBtn.addEventListener( 'click', handleInstallUpdate );
+		$reinstallBtn.addEventListener( 'click', handleReinstall );
 
 		// Initial data load.
 		loadStatus();
@@ -140,6 +142,35 @@
 			.catch( function ( err ) {
 				showProgress( false );
 				showNotice( 'error', err.message || __( 'Update failed.', 'examplepress-theme-update' ) );
+			} )
+			.finally( function () {
+				isInstalling = false;
+				$checkBtn.disabled = false;
+				if ( currentStatus ) {
+					updateButtons( currentStatus );
+				}
+			} );
+	}
+
+	function handleReinstall() {
+		if ( isInstalling ) return;
+		if ( ! currentStatus || ! currentStatus.current_version ) return;
+
+		isInstalling          = true;
+		$reinstallBtn.disabled = true;
+		$installBtn.disabled   = true;
+		$checkBtn.disabled     = true;
+		showProgress( true, __( 'Reinstalling theme…', 'examplepress-theme-update' ) );
+
+		api( 'POST', '/reinstall' )
+			.then( function ( result ) {
+				showProgress( false );
+				showNotice( 'success', result.message || __( 'Theme reinstalled successfully.', 'examplepress-theme-update' ) );
+				loadStatus();
+			} )
+			.catch( function ( err ) {
+				showProgress( false );
+				showNotice( 'error', err.message || __( 'Reinstall failed.', 'examplepress-theme-update' ) );
 			} )
 			.finally( function () {
 				isInstalling = false;
@@ -405,7 +436,8 @@
 	// ── UI helpers ────────────────────────────────────────────────────
 
 	function updateButtons( status ) {
-		$installBtn.disabled = ! status.update_available || isInstalling || ! status.current_version;
+		$installBtn.disabled   = ! status.update_available || isInstalling || ! status.current_version;
+		$reinstallBtn.disabled = ! status.current_version || isInstalling;
 	}
 
 	function showSpinner( visible ) {

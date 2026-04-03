@@ -105,6 +105,18 @@ final class RestController {
 				],
 			],
 		] );
+
+		register_rest_route( self::NAMESPACE, '/reinstall', [
+			'methods'             => 'POST',
+			'callback'            => [ $this, 'reinstall' ],
+			'permission_callback' => [ $this, 'check_permission' ],
+			'args'                => [
+				'version' => [
+					'type'     => 'string',
+					'required' => false,
+				],
+			],
+		] );
 	}
 
 	/**
@@ -237,6 +249,29 @@ final class RestController {
 		if ( ! $result['success'] ) {
 			return new \WP_Error(
 				'ep_install_failed',
+				$result['message'],
+				[ 'status' => 500 ]
+			);
+		}
+
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * POST /reinstall — reinstall the current (or specified) version.
+	 *
+	 * Forces a fresh install of the same version to reset the theme
+	 * directory to a clean state, removing any local modifications.
+	 */
+	public function reinstall( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$version = $request->get_param( 'version' );
+		$version = $version ? sanitize_text_field( $version ) : null;
+
+		$result = $this->updater->reinstall( $version );
+
+		if ( ! $result['success'] ) {
+			return new \WP_Error(
+				'ep_reinstall_failed',
 				$result['message'],
 				[ 'status' => 500 ]
 			);

@@ -367,6 +367,108 @@ final class Updater {
 		];
 	}
 
+	/**
+	 * Reinstall the currently installed version (or a specific version).
+	 *
+	 * Unlike install_version(), this bypasses Theme_Upgrader::upgrade()
+	 * which refuses to act when the version hasn't changed. Instead it
+	 * injects a fake "newer" version into the transient to force the
+	 * upgrade path, then lets the real package URL install the correct
+	 * version.
+	 *
+	 * @param  string|null $version Version to reinstall, or null for the currently installed version.
+	 * @return array{ success: bool, message: string }
+	 */
+	public function reinstall( ?string $version = null ): array {
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		require_once ABSPATH . 'wp-admin/includes/class-automatic-upgrader-skin.php';
+
+		$local_version = $this->get_local_version();
+
+		if ( ! $local_version ) {
+			return [
+				'success' => false,
+				'message' => 'ExamplePress theme is not installed.',
+			];
+		}
+
+		$target = $version ?? $local_version;
+
+		$manifest = $this->github->get_manifest_for_version( $target );
+
+		if ( ! $manifest ) {
+			// Try the current channel manifest if the version matches.
+			$channel  = $this->channel_resolver->resolve();
+			$manifest = $this->github->get_manifest( $channel );
+
+			if ( ! $manifest || ( $manifest['version'] ?? '' ) !== $target ) {
+				return [
+					'success' => false,
+					'message' => sprintf( 'Could not fetch manifest for version %s.', $target ),
+				];
+			}
+		}
+
+		$download_url = $this->github->resolve_package_url( $manifest );
+
+		if ( ! $download_url ) {
+			return [
+				'success' => false,
+				'message' => 'No download URL found in manifest.',
+			];
+		}
+
+		$skin     = new \Automatic_Upgrader_Skin();
+		$upgrader = new \Theme_Upgrader( $skin );
+
+		// Trick Theme_Upgrader::upgrade() into running by injecting a
+		// fake version that is always "newer" than the installed one.
+		// The actual package URL still points to the correct version.
+		$transient = get_site_transient( 'update_themes' );
+
+		if ( ! is_object( $transient ) ) {
+			$transient = new \stdClass();
+		}
+
+		$transient->response[ self::THEME_SLUG ] = [
+			'theme'        => self::THEME_SLUG,
+			'new_version'  => $target . '.999',
+			'url'          => $manifest['details_url'] ?? $this->github->get_repo_url(),
+			'package'      => $download_url,
+			'requires'     => $manifest['requires'] ?? '',
+			'requires_php' => $manifest['requires_php'] ?? '8.0',
+		];
+
+		set_site_transient( 'update_themes', $transient );
+
+		$result = $upgrader->upgrade( self::THEME_SLUG );
+
+		// Flush cache and clean up the fake transient entry.
+		$this->cache->flush();
+
+		if ( is_wp_error( $result ) ) {
+			return [
+				'success' => false,
+				'message' => $result->get_error_message(),
+			];
+		}
+
+		if ( true !== $result ) {
+			$messages = $skin->get_upgrade_messages();
+			$last     = end( $messages );
+
+			return [
+				'success' => false,
+				'message' => $last ?: 'Reinstall failed with an unknown error.',
+			];
+		}
+
+		return [
+			'success' => true,
+			'message' => sprintf( 'Reinstalled version %s.', $target ),
+		];
+	}
+
 	// -----------------------------------------------------------------
 	//  Helpers
 	// -----------------------------------------------------------------
