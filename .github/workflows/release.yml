@@ -38,6 +38,7 @@ jobs:
 
     env:
       APP_JSON_PATH: "${{ vars.APP_JSON_PATH || 'examplepress.json' }}"
+      ENTRY_FILE:    "${{ vars.ENTRY_FILE || 'examplepress-theme-update.php' }}"
 
     steps:
       - name: Checkout PR branch
@@ -46,16 +47,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.head_ref }}
 
-      - name: Get PR Version from examplepress.json
+      - name: Get PR Version from plugin header
         id: pr_version
         run: |
-          if [ ! -f "${{ env.APP_JSON_PATH }}" ]; then
-            echo "::error::examplepress.json not found at ${{ env.APP_JSON_PATH }}"
+          if [ ! -f "${{ env.ENTRY_FILE }}" ]; then
+            echo "::error::Entry file not found at ${{ env.ENTRY_FILE }}"
             exit 1
           fi
-          VERSION=$(jq -r '.version // empty' "${{ env.APP_JSON_PATH }}")
+          VERSION=$(grep -oP '^\s*\*?\s*Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' "${{ env.ENTRY_FILE }}" | head -1)
           if [ -z "$VERSION" ]; then
-            echo "::error::Version not found in examplepress.json."
+            echo "::error::Version header not found in ${{ env.ENTRY_FILE }}"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -67,16 +68,16 @@ jobs:
           ref: main
           path: main_branch
 
-      - name: Get main Version from examplepress.json
+      - name: Get main Version from plugin header
         id: main_version
         run: |
-          if [ ! -f "main_branch/${{ env.APP_JSON_PATH }}" ]; then
-            echo "::error::examplepress.json not found at main_branch/${{ env.APP_JSON_PATH }}"
+          if [ ! -f "main_branch/${{ env.ENTRY_FILE }}" ]; then
+            echo "::error::Entry file not found at main_branch/${{ env.ENTRY_FILE }}"
             exit 1
           fi
-          VERSION=$(jq -r '.version // empty' "main_branch/${{ env.APP_JSON_PATH }}")
+          VERSION=$(grep -oP '^\s*\*?\s*Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' "main_branch/${{ env.ENTRY_FILE }}" | head -1)
           if [ -z "$VERSION" ]; then
-            echo "::error::Version not found in examplepress.json on main."
+            echo "::error::Version header not found in ${{ env.ENTRY_FILE }} on main."
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -86,16 +87,19 @@ jobs:
           PR_VERSION="${{ steps.pr_version.outputs.version }}"
           MAIN_VERSION="${{ steps.main_version.outputs.version }}"
           if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
-            echo "::error::App version in examplepress.json was not bumped. Current: $MAIN_VERSION"
+            echo "::error::Plugin version was not bumped in ${{ env.ENTRY_FILE }}. Current: $MAIN_VERSION"
             exit 1
           fi
 
-      - name: Validate Plugin Header Version
+      - name: Validate examplepress.json exists
         run: |
-          HEADER_VERSION=$(grep -oP 'Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' examplepress-theme-update.php | head -1)
-          JSON_VERSION="${{ steps.pr_version.outputs.version }}"
-          if [ "$HEADER_VERSION" != "$JSON_VERSION" ]; then
-            echo "::error::Plugin header version ($HEADER_VERSION) does not match examplepress.json version ($JSON_VERSION). Update both."
+          if [ ! -f "${{ env.APP_JSON_PATH }}" ]; then
+            echo "::error::examplepress.json not found at ${{ env.APP_JSON_PATH }}"
+            exit 1
+          fi
+          SLUG=$(jq -r '.slug // empty' "${{ env.APP_JSON_PATH }}")
+          if [ -z "$SLUG" ]; then
+            echo "::error::Slug not found in examplepress.json."
             exit 1
           fi
 
@@ -111,6 +115,7 @@ jobs:
 
     env:
       APP_JSON_PATH: "${{ vars.APP_JSON_PATH || 'examplepress.json' }}"
+      ENTRY_FILE:    "${{ vars.ENTRY_FILE || 'examplepress-theme-update.php' }}"
 
     outputs:
       version:       ${{ steps.version.outputs.version }}
@@ -127,16 +132,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get Version and Slug from examplepress.json
+      - name: Get Version from plugin header and Slug from examplepress.json
         id: version
         run: |
-          if [ ! -f "${{ env.APP_JSON_PATH }}" ]; then
-            echo "::error::examplepress.json not found at ${{ env.APP_JSON_PATH }}"
+          # --- Version from plugin header (single source of truth) ---
+          if [ ! -f "${{ env.ENTRY_FILE }}" ]; then
+            echo "::error::Entry file not found at ${{ env.ENTRY_FILE }}"
             exit 1
           fi
-          VERSION=$(jq -r '.version // empty' "${{ env.APP_JSON_PATH }}")
+          VERSION=$(grep -oP '^\s*\*?\s*Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' "${{ env.ENTRY_FILE }}" | head -1)
           if [ -z "$VERSION" ]; then
-            echo "::error::Version not found in examplepress.json."
+            echo "::error::Version header not found in ${{ env.ENTRY_FILE }}"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # --- Slug from examplepress.json ---
+          if [ ! -f "${{ env.APP_JSON_PATH }}" ]; then
+            echo "::error::examplepress.json not found at ${{ env.APP_JSON_PATH }}"
             exit 1
           fi
           SLUG=$(jq -r '.slug // empty' "${{ env.APP_JSON_PATH }}")
@@ -144,7 +157,6 @@ jobs:
             echo "::error::Slug not found in examplepress.json."
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
 
       - name: Prepare Release Variables
@@ -156,7 +168,7 @@ jobs:
 
           if [ "$REF_TYPE" = "tag" ]; then
             if [ "$REF_NAME" != "v${BASE_VERSION}" ]; then
-              echo "::error::Tag ($REF_NAME) does not match examplepress.json version (v${BASE_VERSION}). Update examplepress.json first."
+              echo "::error::Tag ($REF_NAME) does not match plugin header version (v${BASE_VERSION}). Update the plugin header first."
               exit 1
             fi
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
@@ -272,7 +284,7 @@ jobs:
           SIZE=$(stat -c %s "$ZIP_NAME")
           DL_URL="https://github.com/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.release_tag }}/${ZIP_NAME}"
 
-          # Build updates.json with the same schema as the theme workflow.
+          # Build updates.json — same packages schema as the theme workflow.
           jq -n \
             --arg ver "${{ needs.preflight.outputs.version }}" \
             --arg slug "${{ env.APP_SLUG }}" \
