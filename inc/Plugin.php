@@ -29,7 +29,7 @@ final class Plugin {
 		$cache            = new Cache();
 		$github           = new GitHubClient( 'webmultipliers/examplepress-theme', $cache );
 		$channel_resolver = new ChannelResolver();
-		$updater          = new Updater( $github, $channel_resolver );
+		$updater          = new Updater( $github, $channel_resolver, $cache );
 		$protection       = new Protection( plugin_basename( $plugin_file ) );
 		$admin_page       = new AdminPage( $updater );
 		$rest             = new RestController( $updater, $github, $channel_resolver, $cache );

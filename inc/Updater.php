@@ -19,10 +19,12 @@ final class Updater {
 
 	private GitHubClient    $github;
 	private ChannelResolver $channel_resolver;
+	private Cache           $cache;
 
-	public function __construct( GitHubClient $github, ChannelResolver $channel_resolver ) {
+	public function __construct( GitHubClient $github, ChannelResolver $channel_resolver, Cache $cache ) {
 		$this->github           = $github;
 		$this->channel_resolver = $channel_resolver;
+		$this->cache            = $cache;
 	}
 
 	/**
@@ -70,7 +72,7 @@ final class Updater {
 			'channel'          => $channel,
 			'channel_source'   => $this->channel_resolver->get_channel_source(),
 			'pinned_version'   => $pinned,
-			'last_checked'     => ( new Cache() )->get_last_checked(),
+			'last_checked'     => $this->cache->get_last_checked(),
 			'theme_active'     => $this->is_ep_theme_active(),
 		];
 	}
@@ -340,7 +342,7 @@ final class Updater {
 		$result = $upgrader->upgrade( self::THEME_SLUG );
 
 		// Flush cache after install.
-		( new Cache() )->flush();
+		$this->cache->flush();
 
 		if ( is_wp_error( $result ) ) {
 			return [

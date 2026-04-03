@@ -37,6 +37,10 @@ final class GitHubClient {
 	 * Returns a cached result when available. On cache miss, fetches
 	 * from GitHub, validates, and caches the result.
 	 *
+	 * When the direct manifest URL fails (e.g. no stable release exists),
+	 * falls back to searching the releases list for the best matching
+	 * release's updates.json asset.
+	 *
 	 * @return array<string, mixed>|null Parsed manifest or null on failure.
 	 */
 	public function get_manifest( string $channel ): ?array {
@@ -49,24 +53,33 @@ final class GitHubClient {
 		$manifest_url = $this->build_manifest_url( $channel );
 		$body         = $this->remote_get( $manifest_url );
 
+		// If the direct URL failed, fall back to the releases list.
 		if ( null === $body ) {
+			$this->log( sprintf( 'Direct manifest URL failed for channel "%s", falling back to releases list.', $channel ) );
+			$data = $this->resolve_manifest_from_releases( $channel );
+
+			if ( $data ) {
+				$this->cache->set_manifest( $data );
+				$this->cache->set_last_checked();
+				return $data;
+			}
+
 			$this->cache->set_manifest_error();
 			return null;
 		}
 
 		$data = json_decode( $body, true );
 
-		if ( ! is_array( $data ) || empty( $data['version'] ) ) {
-			$this->log( 'Manifest JSON is invalid or missing required version field.' );
-			$this->cache->set_manifest_error();
-			return null;
-		}
+		if ( ! $this->validate_manifest( $data ) ) {
+			// Try the releases fallback before giving up.
+			$data = $this->resolve_manifest_from_releases( $channel );
 
-		$has_download = ! empty( $data['download_url'] );
-		$has_packages = ! empty( $data['packages'] ) && is_array( $data['packages'] );
+			if ( $data ) {
+				$this->cache->set_manifest( $data );
+				$this->cache->set_last_checked();
+				return $data;
+			}
 
-		if ( ! $has_download && ! $has_packages ) {
-			$this->log( 'Manifest has no download_url and no packages array.' );
 			$this->cache->set_manifest_error();
 			return null;
 		}
@@ -261,10 +274,134 @@ final class GitHubClient {
 	// -----------------------------------------------------------------
 
 	/**
+	 * Validate that a decoded manifest array has the required fields.
+	 */
+	private function validate_manifest( $data ): bool {
+		if ( ! is_array( $data ) || empty( $data['version'] ) ) {
+			$this->log( 'Manifest JSON is invalid or missing required version field.' );
+			return false;
+		}
+
+		$has_download = ! empty( $data['download_url'] );
+		$has_packages = ! empty( $data['packages'] ) && is_array( $data['packages'] );
+
+		if ( ! $has_download && ! $has_packages ) {
+			$this->log( 'Manifest has no download_url and no packages array.' );
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Fallback: find the best release for the given channel from the
+	 * releases list and fetch its updates.json asset.
+	 *
+	 * For "stable": finds the first non-prerelease release.
+	 * For "development": finds the first prerelease with "development" in the tag.
+	 * As a last resort: uses the very first release regardless of type.
+	 *
+	 * @return array<string, mixed>|null Parsed manifest or null.
+	 */
+	private function resolve_manifest_from_releases( string $channel ): ?array {
+		$releases = $this->get_releases();
+
+		if ( null === $releases || empty( $releases ) ) {
+			$this->log( 'No releases found for manifest fallback.' );
+			return null;
+		}
+
+		$target_release = null;
+
+		if ( 'stable' === $channel ) {
+			// Prefer non-prerelease.
+			foreach ( $releases as $release ) {
+				if ( empty( $release['prerelease'] ) && ! empty( $release['tag_name'] ) ) {
+					$target_release = $release;
+					break;
+				}
+			}
+		} else {
+			// Development: prefer prerelease with "development" in tag.
+			foreach ( $releases as $release ) {
+				if ( ! empty( $release['tag_name'] ) && false !== strpos( $release['tag_name'], 'development' ) ) {
+					$target_release = $release;
+					break;
+				}
+			}
+		}
+
+		// Last resort: use the first release with a tag.
+		if ( ! $target_release ) {
+			foreach ( $releases as $release ) {
+				if ( ! empty( $release['tag_name'] ) ) {
+					$target_release = $release;
+					break;
+				}
+			}
+		}
+
+		if ( ! $target_release ) {
+			$this->log( 'No suitable release found for manifest fallback.' );
+			return null;
+		}
+
+		return $this->fetch_manifest_from_release( $target_release );
+	}
+
+	/**
+	 * Fetch and parse the updates.json asset from a single release.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	private function fetch_manifest_from_release( array $release ): ?array {
+		$tag = $release['tag_name'];
+
+		// Try the named asset first.
+		foreach ( $release['assets'] ?? [] as $asset ) {
+			if ( 'updates.json' === ( $asset['name'] ?? '' ) ) {
+				$body = $this->remote_get( $asset['browser_download_url'] );
+
+				if ( null !== $body ) {
+					$data = json_decode( $body, true );
+
+					if ( $this->validate_manifest( $data ) ) {
+						return $data;
+					}
+				}
+
+				break;
+			}
+		}
+
+		// Predictable fallback URL.
+		$fallback_url = sprintf(
+			'https://github.com/%s/releases/download/%s/updates.json',
+			$this->repo,
+			$tag
+		);
+
+		$body = $this->remote_get( $fallback_url );
+
+		if ( null === $body ) {
+			$this->log( sprintf( 'No updates.json found for release %s.', $tag ) );
+			return null;
+		}
+
+		$data = json_decode( $body, true );
+
+		if ( ! $this->validate_manifest( $data ) ) {
+			return null;
+		}
+
+		return $data;
+	}
+
+	/**
 	 * Build the URL to the updates.json release asset.
 	 *
 	 * For stable: /releases/latest/download/updates.json
-	 * For development: resolved via resolve_prerelease_manifest_url().
+	 * For development: resolved from the releases list.
 	 */
 	private function build_manifest_url( string $channel ): string {
 		/**
@@ -286,12 +423,15 @@ final class GitHubClient {
 			);
 		}
 
+		// Development channel: find the URL from the releases list.
 		return $this->resolve_prerelease_manifest_url();
 	}
 
 	/**
-	 * Query GitHub's Releases API to find the latest pre-release
-	 * and return its updates.json asset URL.
+	 * Find the updates.json asset URL for the latest development release.
+	 *
+	 * Reuses the cached releases list from get_releases() instead of
+	 * making a duplicate API call.
 	 */
 	private function resolve_prerelease_manifest_url(): string {
 		$fallback = sprintf(
@@ -299,25 +439,9 @@ final class GitHubClient {
 			$this->repo
 		);
 
-		$api_url = sprintf(
-			'https://api.github.com/repos/%s/releases',
-			$this->repo
-		);
+		$releases = $this->get_releases();
 
-		$body = $this->remote_get( $api_url, [
-			'timeout' => 10,
-			'headers' => [
-				'Accept' => 'application/vnd.github+json',
-			],
-		] );
-
-		if ( null === $body ) {
-			return $fallback;
-		}
-
-		$releases = json_decode( $body, true );
-
-		if ( ! is_array( $releases ) ) {
+		if ( null === $releases ) {
 			return $fallback;
 		}
 
