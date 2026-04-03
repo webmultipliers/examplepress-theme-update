@@ -3,3 +3,6 @@
 .gitignore
 .distignore
 README.md
+PLAN.md
+tests/
+node_modules/

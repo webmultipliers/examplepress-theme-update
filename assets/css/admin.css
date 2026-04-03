@@ -1,0 +1,310 @@
+/**
+ * ExamplePress Theme Updates — Admin Page Styles
+ *
+ * Scoped to #ep-theme-updates. Uses WP-native conventions.
+ */
+
+/* ── Cards ──────────────────────────────────────────────────────── */
+
+#ep-theme-updates {
+	max-width: 800px;
+	margin-top: 20px;
+}
+
+#ep-theme-updates .ep-card {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 8px;
+	padding: 16px 24px;
+	margin-bottom: 16px;
+}
+
+#ep-theme-updates .ep-card h2 {
+	margin-top: 0;
+	margin-bottom: 12px;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+/* ── Loading placeholder ────────────────────────────────────────── */
+
+#ep-theme-updates .ep-loading .ep-placeholder-lines span {
+	display: block;
+	height: 14px;
+	background: #f0f0f1;
+	border-radius: 4px;
+	margin-bottom: 10px;
+	animation: ep-pulse 1.5s ease-in-out infinite;
+}
+
+#ep-theme-updates .ep-loading .ep-placeholder-lines span:nth-child(1) { width: 60%; }
+#ep-theme-updates .ep-loading .ep-placeholder-lines span:nth-child(2) { width: 45%; }
+#ep-theme-updates .ep-loading .ep-placeholder-lines span:nth-child(3) { width: 70%; }
+#ep-theme-updates .ep-loading .ep-placeholder-lines span:nth-child(4) { width: 55%; }
+
+@keyframes ep-pulse {
+	0%, 100% { opacity: 0.4; }
+	50% { opacity: 1; }
+}
+
+/* ── Status card ────────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-status-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px 24px;
+}
+
+#ep-theme-updates .ep-status-item {
+	display: flex;
+	flex-direction: column;
+}
+
+#ep-theme-updates .ep-status-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: #646970;
+	margin-bottom: 4px;
+}
+
+#ep-theme-updates .ep-status-value {
+	font-size: 14px;
+	font-weight: 500;
+	color: #1d2327;
+}
+
+/* ── Badges ──────────────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-badge {
+	display: inline-block;
+	font-size: 12px;
+	font-weight: 500;
+	padding: 2px 8px;
+	border-radius: 10px;
+	line-height: 1.5;
+}
+
+#ep-theme-updates .ep-badge--current {
+	background: #d7f0d7;
+	color: #1a5e1a;
+}
+
+#ep-theme-updates .ep-badge--update {
+	background: #fcf0e3;
+	color: #8a6116;
+}
+
+#ep-theme-updates .ep-badge--error {
+	background: #fce4e4;
+	color: #8a1616;
+}
+
+#ep-theme-updates .ep-badge--prerelease {
+	background: #e8e0f0;
+	color: #4c3d6e;
+}
+
+/* ── Channel selector ───────────────────────────────────────────── */
+
+#ep-theme-updates .ep-channel-options {
+	display: flex;
+	gap: 16px;
+	margin-bottom: 12px;
+}
+
+#ep-theme-updates .ep-channel-option {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+#ep-theme-updates .ep-channel-option label {
+	cursor: pointer;
+	line-height: 1.5;
+}
+
+#ep-theme-updates .ep-channel-option .ep-channel-desc {
+	display: block;
+	font-size: 12px;
+	color: #646970;
+	margin-top: 2px;
+}
+
+#ep-theme-updates .ep-channel-locked {
+	padding: 8px 12px;
+	background: #f0f0f1;
+	border-radius: 4px;
+	font-size: 13px;
+	color: #646970;
+}
+
+#ep-theme-updates .ep-channel-actions {
+	margin-top: 8px;
+}
+
+/* ── Version pinning ────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-pin-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+#ep-theme-updates .ep-pin-controls select {
+	min-width: 200px;
+}
+
+#ep-theme-updates .ep-pin-notice {
+	margin-top: 8px;
+	padding: 8px 12px;
+	background: #fcf0e3;
+	border-left: 4px solid #dba617;
+	border-radius: 0 4px 4px 0;
+	font-size: 13px;
+}
+
+/* ── Actions ────────────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-actions-content {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+#ep-theme-updates .ep-actions-content .spinner {
+	float: none;
+	margin: 0;
+}
+
+#ep-theme-updates .ep-progress {
+	width: 100%;
+	margin-top: 12px;
+}
+
+#ep-theme-updates .ep-progress-bar {
+	height: 4px;
+	background: #2271b1;
+	border-radius: 2px;
+	animation: ep-progress-indeterminate 1.5s ease-in-out infinite;
+	transform-origin: left;
+}
+
+@keyframes ep-progress-indeterminate {
+	0%   { transform: scaleX(0); translate: 0; }
+	50%  { transform: scaleX(0.5); translate: 50%; }
+	100% { transform: scaleX(0); translate: 100%; }
+}
+
+#ep-theme-updates .ep-progress-message {
+	font-size: 13px;
+	color: #646970;
+	margin-top: 8px;
+}
+
+/* ── Release history ────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-releases-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+#ep-theme-updates .ep-release-item {
+	border-bottom: 1px solid #f0f0f1;
+	padding: 12px 0;
+}
+
+#ep-theme-updates .ep-release-item:last-child {
+	border-bottom: none;
+	padding-bottom: 0;
+}
+
+#ep-theme-updates .ep-release-item:first-child {
+	padding-top: 0;
+}
+
+#ep-theme-updates .ep-release-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	user-select: none;
+}
+
+#ep-theme-updates .ep-release-header:hover {
+	color: #2271b1;
+}
+
+#ep-theme-updates .ep-release-toggle {
+	font-size: 12px;
+	transition: transform 0.2s;
+	flex-shrink: 0;
+}
+
+#ep-theme-updates .ep-release-item.ep-open .ep-release-toggle {
+	transform: rotate(90deg);
+}
+
+#ep-theme-updates .ep-release-version {
+	font-weight: 600;
+	font-size: 14px;
+}
+
+#ep-theme-updates .ep-release-name {
+	color: #646970;
+	font-size: 13px;
+}
+
+#ep-theme-updates .ep-release-date {
+	margin-left: auto;
+	font-size: 12px;
+	color: #8c8f94;
+	flex-shrink: 0;
+}
+
+#ep-theme-updates .ep-release-body {
+	display: none;
+	padding: 12px 0 0 20px;
+	font-size: 13px;
+	line-height: 1.6;
+	color: #3c434a;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+#ep-theme-updates .ep-release-item.ep-open .ep-release-body {
+	display: block;
+}
+
+/* ── Notices ─────────────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-notices .notice {
+	margin: 0 0 12px;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────── */
+
+#ep-theme-updates .ep-empty {
+	color: #646970;
+	font-style: italic;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+@media screen and (max-width: 782px) {
+	#ep-theme-updates .ep-status-grid {
+		grid-template-columns: 1fr;
+	}
+
+	#ep-theme-updates .ep-channel-options {
+		flex-direction: column;
+	}
+
+	#ep-theme-updates .ep-pin-controls {
+		flex-direction: column;
+		align-items: stretch;
+	}
+}
