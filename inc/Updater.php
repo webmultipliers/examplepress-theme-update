@@ -21,6 +21,13 @@ final class Updater {
 	private ChannelResolver $channel_resolver;
 	private Cache           $cache;
 
+	/**
+	 * When true, inject_update() passes through without modifying
+	 * the transient. Set during reinstall to prevent the filter from
+	 * removing the injected fake-version entry.
+	 */
+	private bool $bypass_inject = false;
+
 	public function __construct( GitHubClient $github, ChannelResolver $channel_resolver, Cache $cache ) {
 		$this->github           = $github;
 		$this->channel_resolver = $channel_resolver;
@@ -93,6 +100,12 @@ final class Updater {
 	public function inject_update( $transient ) {
 		if ( ! is_object( $transient ) ) {
 			$transient = new \stdClass();
+		}
+
+		// During reinstall, pass through without touching the transient
+		// so the injected fake-version entry survives.
+		if ( $this->bypass_inject ) {
+			return $transient;
 		}
 
 		$local_version = $this->get_local_version();
@@ -421,9 +434,12 @@ final class Updater {
 		$skin     = new \Automatic_Upgrader_Skin();
 		$upgrader = new \Theme_Upgrader( $skin );
 
-		// Trick Theme_Upgrader::upgrade() into running by injecting a
-		// fake version that is always "newer" than the installed one.
-		// The actual package URL still points to the correct version.
+		// Bypass inject_update() so it doesn't remove our fake entry
+		// when set_site_transient triggers pre_set_site_transient_update_themes.
+		$this->bypass_inject = true;
+
+		// Inject a fake "newer" version so Theme_Upgrader::upgrade() proceeds.
+		// The actual package URL still downloads the correct version.
 		$transient = get_site_transient( 'update_themes' );
 
 		if ( ! is_object( $transient ) ) {
@@ -443,7 +459,8 @@ final class Updater {
 
 		$result = $upgrader->upgrade( self::THEME_SLUG );
 
-		// Flush cache and clean up the fake transient entry.
+		// Restore normal inject_update behavior and clean up.
+		$this->bypass_inject = false;
 		$this->cache->flush();
 
 		if ( is_wp_error( $result ) ) {

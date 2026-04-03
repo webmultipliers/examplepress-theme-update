@@ -156,6 +156,14 @@
 		if ( isInstalling ) return;
 		if ( ! currentStatus || ! currentStatus.current_version ) return;
 
+		var confirmed = window.confirm(
+			__( 'Reinstall ExamplePress v', 'examplepress-theme-update' ) +
+			currentStatus.current_version + '?\n\n' +
+			__( 'This will replace the current theme files with a clean copy from the release. Any local modifications to theme files will be lost.', 'examplepress-theme-update' )
+		);
+
+		if ( ! confirmed ) return;
+
 		isInstalling          = true;
 		$reinstallBtn.disabled = true;
 		$installBtn.disabled   = true;
