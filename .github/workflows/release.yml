@@ -1,0 +1,311 @@
+name: Plugin Release
+
+"on":
+  push:
+    branches:
+      - main
+      - development
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even if release exists'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================
+  # JOB 1: PR Verification (Runs ONLY on PRs)
+  # ==========================================
+  pr_verification:
+    name: PR Verification
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      APP_JSON_PATH: "${{ vars.APP_JSON_PATH || 'examplepress.json' }}"
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+
+      - name: Get PR Version from examplepress.json
+        id: pr_version
+        run: |
+          if [ ! -f "${{ env.APP_JSON_PATH }}" ]; then
+            echo "::error::examplepress.json not found at ${{ env.APP_JSON_PATH }}"
+            exit 1
+          fi
+          VERSION=$(jq -r '.version // empty' "${{ env.APP_JSON_PATH }}")
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version not found in examplepress.json."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout main branch for comparison
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          path: main_branch
+
+      - name: Get main Version from examplepress.json
+        id: main_version
+        run: |
+          if [ ! -f "main_branch/${{ env.APP_JSON_PATH }}" ]; then
+            echo "::error::examplepress.json not found at main_branch/${{ env.APP_JSON_PATH }}"
+            exit 1
+          fi
+          VERSION=$(jq -r '.version // empty' "main_branch/${{ env.APP_JSON_PATH }}")
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version not found in examplepress.json on main."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure Version Bump
+        run: |
+          PR_VERSION="${{ steps.pr_version.outputs.version }}"
+          MAIN_VERSION="${{ steps.main_version.outputs.version }}"
+          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo "::error::App version in examplepress.json was not bumped. Current: $MAIN_VERSION"
+            exit 1
+          fi
+
+      - name: Validate Plugin Header Version
+        run: |
+          HEADER_VERSION=$(grep -oP 'Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' examplepress-theme-update.php | head -1)
+          JSON_VERSION="${{ steps.pr_version.outputs.version }}"
+          if [ "$HEADER_VERSION" != "$JSON_VERSION" ]; then
+            echo "::error::Plugin header version ($HEADER_VERSION) does not match examplepress.json version ($JSON_VERSION). Update both."
+            exit 1
+          fi
+
+  # ==========================================
+  # JOB 2: Preflight (Runs ONLY on Push/Tags)
+  # ==========================================
+  preflight:
+    name: Preflight Check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      APP_JSON_PATH: "${{ vars.APP_JSON_PATH || 'examplepress.json' }}"
+
+    outputs:
+      version:       ${{ steps.version.outputs.version }}
+      slug:          ${{ steps.version.outputs.slug }}
+      release_tag:   ${{ steps.prep.outputs.release_tag }}
+      release_name:  ${{ steps.prep.outputs.release_name }}
+      is_prerelease: ${{ steps.prep.outputs.is_prerelease }}
+      make_latest:   ${{ steps.prep.outputs.make_latest }}
+      should_run:    ${{ steps.check_release.outputs.should_run }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Version and Slug from examplepress.json
+        id: version
+        run: |
+          if [ ! -f "${{ env.APP_JSON_PATH }}" ]; then
+            echo "::error::examplepress.json not found at ${{ env.APP_JSON_PATH }}"
+            exit 1
+          fi
+          VERSION=$(jq -r '.version // empty' "${{ env.APP_JSON_PATH }}")
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version not found in examplepress.json."
+            exit 1
+          fi
+          SLUG=$(jq -r '.slug // empty' "${{ env.APP_JSON_PATH }}")
+          if [ -z "$SLUG" ]; then
+            echo "::error::Slug not found in examplepress.json."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Release Variables
+        id: prep
+        run: |
+          BASE_VERSION="${{ steps.version.outputs.version }}"
+          REF_TYPE="${{ github.ref_type }}"
+          REF_NAME="${{ github.ref_name }}"
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "v${BASE_VERSION}" ]; then
+              echo "::error::Tag ($REF_NAME) does not match examplepress.json version (v${BASE_VERSION}). Update examplepress.json first."
+              exit 1
+            fi
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "release_name=Release ${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          elif [ "$REF_TYPE" = "branch" ] && [ "$REF_NAME" = "main" ]; then
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+            echo "release_tag=v${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "release_name=Release ${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            SAFE_BRANCH=$(echo "$REF_NAME" | tr ' /' '--')
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+            echo "release_tag=v${BASE_VERSION}-${SAFE_BRANCH}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            echo "release_name=Pre-release ${BASE_VERSION} (${REF_NAME})" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if Release Exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FORCE="${{ github.event.inputs.force }}"
+          if gh release view "${{ steps.prep.outputs.release_tag }}" >/dev/null 2>&1; then
+            if [ "$FORCE" = "true" ]; then
+              echo "Release exists but force=true. Proceeding."
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Release ${{ steps.prep.outputs.release_tag }} already exists. Skipping build."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ==========================================
+  # JOB 3: Build & Release (Runs ONLY on Push/Tags)
+  # ==========================================
+  build_and_release:
+    name: Build and Release
+    needs: preflight
+    if: github.event_name != 'pull_request' && needs.preflight.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      APP_SLUG: "${{ needs.preflight.outputs.slug }}"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Detect Build Requirements
+        id: detect
+        run: |
+          [ -f "composer.json" ] && echo "needs_php=true" >> "$GITHUB_OUTPUT" || echo "needs_php=false" >> "$GITHUB_OUTPUT"
+          [ -f "package.json"  ] && echo "needs_node=true" >> "$GITHUB_OUTPUT" || echo "needs_node=false" >> "$GITHUB_OUTPUT"
+
+      - name: Setup PHP
+        if: steps.detect.outputs.needs_php == 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "${{ vars.PHP_VERSION || '8.4' }}"
+          tools: composer
+
+      - name: Setup Node
+        if: steps.detect.outputs.needs_node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ vars.NODE_VERSION || '24' }}"
+          cache: 'npm'
+
+      - name: Install Dependencies & Build
+        if: steps.detect.outputs.needs_php == 'true' || steps.detect.outputs.needs_node == 'true'
+        run: |
+          if [ "${{ steps.detect.outputs.needs_php }}" = "true" ]; then
+            composer install --no-dev --optimize-autoloader
+          fi
+          if [ "${{ steps.detect.outputs.needs_node }}" = "true" ]; then
+            npm ci
+            npm run build
+          fi
+
+      - name: Bundle Plugin
+        id: bundle
+        run: |
+          set -e
+
+          STAGING_DIR="staging"
+          UPDATES_FILE="updates.json"
+          DEST="${STAGING_DIR}/${{ env.APP_SLUG }}"
+
+          rm -rf "${STAGING_DIR}"
+          mkdir -p "${DEST}"
+
+          # Copy plugin files, respecting .distignore.
+          rsync -av --checksum . "${DEST}/" --exclude-from=".distignore"
+
+          # Remove staging artifacts from inside the staged copy.
+          rm -rf "${DEST}/staging"
+
+          ZIP_NAME="${{ env.APP_SLUG }}.zip"
+
+          cd "${STAGING_DIR}"
+          zip -rq "../${ZIP_NAME}" "${{ env.APP_SLUG }}"
+          cd ..
+
+          CHECKSUM=$(sha256sum "$ZIP_NAME" | awk '{print $1}')
+          SIZE=$(stat -c %s "$ZIP_NAME")
+          DL_URL="https://github.com/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.release_tag }}/${ZIP_NAME}"
+
+          # Build updates.json with the same schema as the theme workflow.
+          jq -n \
+            --arg ver "${{ needs.preflight.outputs.version }}" \
+            --arg slug "${{ env.APP_SLUG }}" \
+            --arg url "$DL_URL" \
+            --arg sha "$CHECKSUM" \
+            --argjson sz "$SIZE" \
+            '{
+              version: $ver,
+              slug: $slug,
+              packages: [
+                {
+                  variant: "full",
+                  package: $url,
+                  checksum: $sha,
+                  size: $sz
+                }
+              ]
+            }' > "${UPDATES_FILE}"
+
+      - name: Cleanup Staging Directory
+        if: always()
+        run: |
+          rm -rf staging
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.preflight.outputs.release_tag }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          makeLatest: ${{ needs.preflight.outputs.make_latest == 'true' }}
+          commit: ${{ github.sha }}
+          artifacts: "*.zip, updates.json"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
+          generateReleaseNotes: true
