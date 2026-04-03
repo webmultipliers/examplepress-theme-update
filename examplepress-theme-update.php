@@ -4,7 +4,7 @@
  * Plugin URI:   https://github.com/webmultipliers/examplepress-theme-update
  * Description:  Persistent update manager for the ExamplePress theme. Checks for new versions via GitHub Releases and injects them into the WordPress native updater. This plugin cannot be deactivated while ExamplePress is the active theme.
  * Version:      1.0.0
- * Author:       Vinny S. Green
+ * Author:       Web Multipliers
  * Author URI:   https://vinnysgreen.com
  * Requires PHP: 8.0
  */
@@ -20,6 +20,21 @@ defined( 'ABSPATH' ) || exit;
  *  3. Rewriting the download URL so WP can pull the zip from GitHub.
  *  4. Preventing its own deactivation/deletion while the EP theme is active.
  *  5. Clearing update caches on theme switch so stale data never persists.
+ *
+ * The updates.json schema (produced by the shared ExamplePress release workflow):
+ *
+ *   {
+ *     "version": "1.0.4",
+ *     "slug":    "examplepress-theme",
+ *     "packages": [
+ *       {
+ *         "variant":  "full",
+ *         "package":  "https://github.com/.../examplepress-theme.zip",
+ *         "checksum": "sha256...",
+ *         "size":     123456
+ *       }
+ *     ]
+ *   }
  */
 final class ExamplePress_Theme_Updater {
 
@@ -80,7 +95,7 @@ final class ExamplePress_Theme_Updater {
 		add_filter( 'upgrader_source_selection',            [ $this, 'fix_source_dir' ], 10, 4 );
 
 		// ── Cache management ──────────────────────────────────────────
-		add_action( 'switch_theme',         [ $this, 'flush_cache' ] );
+		add_action( 'switch_theme',              [ $this, 'flush_cache' ] );
 		add_action( 'upgrader_process_complete', [ $this, 'flush_cache_after_upgrade' ], 10, 2 );
 
 		// ── Self-protection while EP theme is active ──────────────────
@@ -111,9 +126,9 @@ final class ExamplePress_Theme_Updater {
 			$transient = new \stdClass();
 		}
 
-		$remote = $this->get_remote_manifest();
+		$manifest = $this->get_remote_manifest();
 
-		if ( ! $remote ) {
+		if ( ! $manifest ) {
 			return $transient;
 		}
 
@@ -123,18 +138,30 @@ final class ExamplePress_Theme_Updater {
 			return $transient;
 		}
 
-		if ( version_compare( $remote['version'], $local_version, '>' ) ) {
+		$remote_version = $manifest['version'];
+		$download_url   = $this->resolve_package_url( $manifest );
+
+		if ( ! $download_url ) {
+			$this->log( 'No suitable package found in manifest.' );
+			return $transient;
+		}
+
+		if ( version_compare( $remote_version, $local_version, '>' ) ) {
 			$transient->response[ self::THEME_SLUG ] = [
-				'theme'       => self::THEME_SLUG,
-				'new_version' => $remote['version'],
-				'url'         => $remote['details_url'] ?? $this->get_repo_url(),
-				'package'     => $remote['download_url'],
-				'requires'    => $remote['requires'] ?? '',
-				'requires_php'=> $remote['requires_php'] ?? '8.0',
+				'theme'        => self::THEME_SLUG,
+				'new_version'  => $remote_version,
+				'url'          => $manifest['details_url'] ?? $this->get_repo_url(),
+				'package'      => $download_url,
+				'requires'     => $manifest['requires'] ?? '',
+				'requires_php' => $manifest['requires_php'] ?? '8.0',
 			];
 		} else {
 			// No update available — ensure any stale response entry is cleared.
 			unset( $transient->response[ self::THEME_SLUG ] );
+
+			if ( ! isset( $transient->checked ) ) {
+				$transient->checked = [];
+			}
 
 			$transient->checked[ self::THEME_SLUG ] = $local_version;
 		}
@@ -157,26 +184,28 @@ final class ExamplePress_Theme_Updater {
 			return $result;
 		}
 
-		$remote = $this->get_remote_manifest();
+		$manifest = $this->get_remote_manifest();
 
-		if ( ! $remote ) {
+		if ( ! $manifest ) {
 			return $result;
 		}
 
+		$download_url = $this->resolve_package_url( $manifest );
+
 		return (object) [
-			'name'          => $remote['name'] ?? 'ExamplePress',
+			'name'          => $manifest['name'] ?? 'ExamplePress',
 			'slug'          => self::THEME_SLUG,
-			'version'       => $remote['version'],
-			'author'        => $remote['author'] ?? 'Web Multipliers',
-			'homepage'      => $remote['homepage'] ?? $this->get_repo_url(),
-			'download_link' => $remote['download_url'],
-			'requires'      => $remote['requires'] ?? '',
-			'requires_php'  => $remote['requires_php'] ?? '8.0',
-			'tested'        => $remote['tested'] ?? '',
-			'last_updated'  => $remote['last_updated'] ?? '',
+			'version'       => $manifest['version'],
+			'author'        => $manifest['author'] ?? 'Web Multipliers',
+			'homepage'      => $manifest['homepage'] ?? $this->get_repo_url(),
+			'download_link' => $download_url,
+			'requires'      => $manifest['requires'] ?? '',
+			'requires_php'  => $manifest['requires_php'] ?? '8.0',
+			'tested'        => $manifest['tested'] ?? '',
+			'last_updated'  => $manifest['last_updated'] ?? '',
 			'sections'      => [
-				'description' => $remote['description'] ?? 'A code-first WordPress theme built on Blockstudio.',
-				'changelog'   => $remote['changelog'] ?? '<p>See the <a href="' . esc_url( $this->get_repo_url() . '/releases' ) . '">GitHub Releases</a> page.</p>',
+				'description' => $manifest['description'] ?? 'A code-first WordPress theme built on Blockstudio.',
+				'changelog'   => $manifest['changelog'] ?? '<p>See the <a href="' . esc_url( $this->get_repo_url() . '/releases' ) . '">GitHub Releases</a> page.</p>',
 			],
 		];
 	}
@@ -213,11 +242,57 @@ final class ExamplePress_Theme_Updater {
 	// =====================================================================
 
 	/**
+	 * Resolve the download URL from the manifest's packages array.
+	 *
+	 * Prefers the "full" variant. Falls back to the first available package.
+	 * Also supports a flat `download_url` key for simple manifests.
+	 *
+	 * @param  array<string, mixed> $manifest
+	 * @return string|null
+	 */
+	private function resolve_package_url( array $manifest ): ?string {
+		// Flat key — simple manifest format.
+		if ( ! empty( $manifest['download_url'] ) ) {
+			return $manifest['download_url'];
+		}
+
+		$packages = $manifest['packages'] ?? [];
+
+		if ( empty( $packages ) ) {
+			return null;
+		}
+
+		/**
+		 * Filter the preferred variant to download.
+		 *
+		 * @param string $variant Default 'full'.
+		 */
+		$preferred = apply_filters( 'examplepress_update_variant', 'full' );
+
+		// Look for the preferred variant first.
+		foreach ( $packages as $pkg ) {
+			if ( ( $pkg['variant'] ?? '' ) === $preferred && ! empty( $pkg['package'] ) ) {
+				return $pkg['package'];
+			}
+		}
+
+		// Fall back to the first package with a URL.
+		foreach ( $packages as $pkg ) {
+			if ( ! empty( $pkg['package'] ) ) {
+				return $pkg['package'];
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * Get the remote updates.json manifest, cached via a transient.
 	 *
 	 * Returns an associative array with at minimum:
-	 *   - version      (string) e.g. "1.0.4"
-	 *   - download_url (string) direct URL to the theme zip
+	 *   - version  (string) e.g. "1.0.4"
+	 *   - packages (array)  at least one entry with a `package` URL,
+	 *             OR a flat `download_url` string.
 	 *
 	 * Returns null on failure or if the manifest is unparseable.
 	 *
@@ -227,7 +302,8 @@ final class ExamplePress_Theme_Updater {
 		$cached = get_transient( self::TRANSIENT_KEY );
 
 		if ( false !== $cached && is_array( $cached ) ) {
-			return $cached;
+			// An empty array is our sentinel for a recently-failed fetch.
+			return ! empty( $cached ) ? $cached : null;
 		}
 
 		$manifest_url = $this->build_manifest_url();
@@ -242,7 +318,6 @@ final class ExamplePress_Theme_Updater {
 
 		if ( is_wp_error( $response ) ) {
 			$this->log( 'Manifest fetch failed: ' . $response->get_error_message() );
-			// Cache the failure briefly to avoid hammering on errors.
 			set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
 			return null;
 		}
@@ -258,8 +333,18 @@ final class ExamplePress_Theme_Updater {
 		$body = wp_remote_retrieve_body( $response );
 		$data = json_decode( $body, true );
 
-		if ( ! is_array( $data ) || empty( $data['version'] ) || empty( $data['download_url'] ) ) {
-			$this->log( 'Manifest JSON is invalid or missing required fields.' );
+		if ( ! is_array( $data ) || empty( $data['version'] ) ) {
+			$this->log( 'Manifest JSON is invalid or missing required version field.' );
+			set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
+			return null;
+		}
+
+		// Validate that at least one download path exists.
+		$has_download = ! empty( $data['download_url'] );
+		$has_packages = ! empty( $data['packages'] ) && is_array( $data['packages'] );
+
+		if ( ! $has_download && ! $has_packages ) {
+			$this->log( 'Manifest has no download_url and no packages array.' );
 			set_transient( self::TRANSIENT_KEY, [], 5 * MINUTE_IN_SECONDS );
 			return null;
 		}
@@ -284,7 +369,7 @@ final class ExamplePress_Theme_Updater {
 		 * Allows overriding to point at a custom update server, local file,
 		 * or alternative branch channel.
 		 *
-		 * @param string $url     The manifest URL.
+		 * @param string $url     The manifest URL (empty = use default).
 		 * @param string $channel The active channel ('stable' or 'development').
 		 */
 		$override = apply_filters( 'examplepress_update_manifest_url', '', $this->channel );
@@ -356,7 +441,7 @@ final class ExamplePress_Theme_Updater {
 				}
 			}
 
-			// If the release exists but the asset URL is predictable:
+			// Predictable fallback URL if asset listing is incomplete.
 			return sprintf(
 				'https://github.com/%s/releases/download/%s/updates.json',
 				self::GITHUB_REPO,
@@ -550,8 +635,8 @@ final class ExamplePress_Theme_Updater {
 	 * Check whether the ExamplePress theme (or a child of it) is active.
 	 */
 	private function is_ep_theme_active(): bool {
-		$active    = get_option( 'stylesheet' );
-		$template  = get_option( 'template' );
+		$active   = get_option( 'stylesheet' );
+		$template = get_option( 'template' );
 
 		return self::THEME_SLUG === $active || self::THEME_SLUG === $template;
 	}

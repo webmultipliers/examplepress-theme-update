@@ -1,0 +1,17 @@
+{
+  "slug": "examplepress-theme-update",
+  "version": "1.0.0",
+  "type": "plugin",
+  "name": "ExamplePress Theme Update",
+  "description": "Persistent update manager for the ExamplePress theme.",
+  "author": "Web Multipliers",
+  "author_uri": "https://vinnysgreen.com",
+  "requires_php": "8.0",
+  "requires_wp": "6.9",
+  "license": "GPL-2.0-or-later",
+  "companion": {
+    "required": true,
+    "locked": true,
+    "parent": "examplepress-theme"
+  }
+}
