@@ -3,7 +3,7 @@
  * Plugin Name:  ExamplePress Theme Update
  * Plugin URI:   https://github.com/webmultipliers/examplepress-theme-update
  * Description:  Persistent update manager for the ExamplePress theme. Checks for new versions via GitHub Releases and injects them into the WordPress native updater. This plugin cannot be deactivated while ExamplePress is the active theme.
- * Version:      1.0.0
+ * Version:      1.0.1
  * Author:       Web Multipliers
  * Author URI:   https://vinnysgreen.com
  * Requires PHP: 8.0
